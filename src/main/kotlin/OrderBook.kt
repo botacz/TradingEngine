@@ -1,6 +1,6 @@
 class OrderBook(val symbol: String){
-    val bids = mutableListOf<Order>()
-    val asks = mutableListOf<Order>()
+    private val bids = mutableListOf<Order>()
+    private val asks = mutableListOf<Order>()
     fun addOrder(order: Order) {
         if(order.type == OrderType.Buy){
             bids.add(order)
