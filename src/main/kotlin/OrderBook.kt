@@ -1,3 +1,5 @@
+import java.math.BigDecimal
+
 class OrderBook(val symbol: String){
     private val bids = mutableListOf<Order>()
     private val asks = mutableListOf<Order>()
@@ -39,10 +41,10 @@ class OrderBook(val symbol: String){
             bestBid.quantity -= quantity
             bestAsk.quantity -= quantity
 
-            if(bestBid.quantity <= 0){
+            if(bestBid.quantity <= BigDecimal.ZERO){
                 bids.removeAt(0)
             }
-            if(bestAsk.quantity <= 0){
+            if(bestAsk.quantity <= BigDecimal.ZERO){
                 asks.removeAt(0)
             }
         }
