@@ -5,7 +5,7 @@ import kotlin.test.assertEquals
 
 class TradeTest {
     @Test
-    fun `should calculate total value correctly`(){
+    fun `should calculate total value correctly`() {
         val trade = Trade("01", "BTC", "150.50".toBigDecimal(), "2".toBigDecimal())
 
         val totalValue = trade.totalValue()

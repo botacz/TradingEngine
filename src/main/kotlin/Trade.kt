@@ -6,8 +6,8 @@ data class Trade(
     val price: BigDecimal,
     val quantity: BigDecimal,
     val note: String? = null
-){
+) {
     fun totalValue(): BigDecimal {
-        return price*quantity
+        return price * quantity
     }
 }

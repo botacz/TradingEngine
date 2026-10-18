@@ -1,8 +1,9 @@
 import java.math.BigDecimal
 
-enum class OrderType{
+enum class OrderType {
     Buy, Sell
 }
+
 data class Order(
     val id: String,
     val symbol: String,
