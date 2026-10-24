@@ -1,18 +1,17 @@
 import java.math.BigDecimal
 
-class UserPortfolio() {
+class UserPortfolio(val id: String) {
     private val wallet = mutableMapOf<String, BigDecimal>()
 
     fun addMoney(amount: BigDecimal, currency: String) {
-        if (!hasEnoughBalance(amount, currency)) {
-            throw IllegalArgumentException("Cannot remove $amount $currency. Insufficient funds.")
-        }
-
         val current = wallet.getOrDefault(currency, BigDecimal.ZERO)
         wallet[currency] = current + amount
     }
 
     fun removeMoney(amount: BigDecimal, currency: String) {
+        if (!hasEnoughBalance(amount, currency)) {
+            throw IllegalArgumentException("Cannot remove $amount $currency. Insufficient funds.")
+        }
         val current = wallet.getOrDefault(currency, BigDecimal.ZERO)
         wallet[currency] = current - amount
     }
@@ -24,13 +23,12 @@ class UserPortfolio() {
 
     fun processTrade(trade: Trade, orderType: OrderType) {
         val totalUsd = trade.totalValue()
-
         when (orderType) {
-            OrderType.Buy -> {
+            OrderType.BUY -> {
                 removeMoney(totalUsd, "USD")
                 addMoney(trade.quantity, trade.symbol)
             }
-            OrderType.Sell -> {
+            OrderType.SELL -> {
                 removeMoney(trade.quantity, trade.symbol)
                 addMoney(totalUsd, "USD")
             }

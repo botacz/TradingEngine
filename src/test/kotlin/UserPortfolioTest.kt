@@ -7,7 +7,7 @@ class UserPortfolioTest {
 
     @Test
     fun `addMoney should increase balance correctly`() {
-        val portfolio = UserPortfolio()
+        val portfolio = UserPortfolio("user-1")
         portfolio.addMoney("100".toBigDecimal(), "USD")
 
         assertTrue(portfolio.hasEnoughBalance("100".toBigDecimal(), "USD"))
@@ -15,7 +15,7 @@ class UserPortfolioTest {
 
     @Test
     fun `removeMoney should decrease balance correctly`() {
-        val portfolio = UserPortfolio()
+        val portfolio = UserPortfolio("user-2")
         portfolio.addMoney("100".toBigDecimal(), "USD")
         portfolio.removeMoney("40".toBigDecimal(), "USD")
 
@@ -24,7 +24,7 @@ class UserPortfolioTest {
 
     @Test
     fun `removeMoney should throw exception when funds are insufficient`() {
-        val portfolio = UserPortfolio()
+        val portfolio = UserPortfolio("user-3")
         portfolio.addMoney("50".toBigDecimal(), "USD")
 
         assertFailsWith<IllegalArgumentException> {

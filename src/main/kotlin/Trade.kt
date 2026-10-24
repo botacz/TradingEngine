@@ -5,9 +5,9 @@ data class Trade(
     val symbol: String,
     val price: BigDecimal,
     val quantity: BigDecimal,
-    val note: String? = null
+    val note: String? = null,
+    val buyerId: String,
+    val sellerId: String
 ) {
-    fun totalValue(): BigDecimal {
-        return price * quantity
-    }
+    fun totalValue(): BigDecimal = price * quantity
 }

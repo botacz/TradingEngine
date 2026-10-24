@@ -7,8 +7,8 @@ class OrderBookTest {
     @Test
     fun `should match orders when buy price is equal to sell price`() {
         val orderBook = OrderBook("BTC")
-        val buyOrder = Order("O-1", "BTC", 60000.toBigDecimal(), 1.toBigDecimal(), OrderType.Buy)
-        val sellOrder = Order("O-2", "BTC", 60000.toBigDecimal(), 1.toBigDecimal(), OrderType.Sell)
+        val buyOrder = Order("O-1","user-1", "BTC", 60000.toBigDecimal(), 1.toBigDecimal(), OrderType.BUY)
+        val sellOrder = Order("O-2", "user-2", "BTC", 60000.toBigDecimal(), 1.toBigDecimal(), OrderType.SELL)
         orderBook.addOrder(buyOrder)
         orderBook.addOrder(sellOrder)
 
@@ -21,8 +21,8 @@ class OrderBookTest {
     @Test
     fun `should not match orders when buy price is lower than sell price`() {
         val orderBook = OrderBook("BTC")
-        val buyOrder = Order("O-1", "BTC", 50000.toBigDecimal(), 1.toBigDecimal(), OrderType.Buy)
-        val sellOrder = Order("O-2", "BTC", 60000.toBigDecimal(), 1.toBigDecimal(), OrderType.Sell)
+        val buyOrder = Order("O-1", "user1", "BTC", 50000.toBigDecimal(), 1.toBigDecimal(), OrderType.BUY)
+        val sellOrder = Order("O-2", "user2","BTC", 60000.toBigDecimal(), 1.toBigDecimal(), OrderType.SELL)
         orderBook.addOrder(buyOrder)
         orderBook.addOrder(sellOrder)
 
@@ -34,8 +34,8 @@ class OrderBookTest {
     @Test
     fun `should partially match orders when buy quantity is greater than sell quantity`() {
         val orderBook = OrderBook("BTC")
-        val buyOrder = Order("O-1", "BTC", 60000.toBigDecimal(), 2.toBigDecimal(), OrderType.Buy)
-        val sellOrder = Order("O-2", "BTC", 60000.toBigDecimal(), 1.toBigDecimal(), OrderType.Sell)
+        val buyOrder = Order("O-1","user-1", "BTC", 60000.toBigDecimal(), 2.toBigDecimal(), OrderType.BUY)
+        val sellOrder = Order("O-2", "user-2","BTC", 60000.toBigDecimal(), 1.toBigDecimal(), OrderType.SELL)
         orderBook.addOrder(buyOrder)
         orderBook.addOrder(sellOrder)
 
