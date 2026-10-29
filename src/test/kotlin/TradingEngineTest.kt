@@ -185,4 +185,170 @@ class TradingEngineTest {
 
         assertTrue(buyer2.hasEnoughBalance("1".toBigDecimal(), "BTC"))
     }
+
+    @Test
+    fun `should trigger take profit order when market price rises`() {
+        val engine = TradingEngine()
+
+        val seller = UserPortfolio("seller-1")
+        seller.addMoney("1".toBigDecimal(), "BTC")
+
+        val seller2 = UserPortfolio("seller-2")
+        seller2.addMoney("1".toBigDecimal(), "BTC")
+
+        val buyer1 = UserPortfolio("buyer-1")
+        buyer1.addMoney("65000".toBigDecimal(), "USD")
+
+        val buyer2 = UserPortfolio("buyer-2")
+        buyer2.addMoney("65000".toBigDecimal(), "USD")
+
+        val takeProfitOrder = Order(
+            id = "O-TP",
+            userId = seller.id,
+            symbol = "BTC",
+            price = null,
+            quantity = "1".toBigDecimal(),
+            type = OrderType.SELL,
+            execution = OrderExecution.TAKE_PROFIT,
+            takeProfitPrice = "65000".toBigDecimal()
+        )
+        engine.placeOrder(seller, takeProfitOrder)
+
+        val limitSell = Order(
+            id = "O-SELL2",
+            userId = seller2.id,
+            symbol = "BTC",
+            price = "65000".toBigDecimal(),
+            quantity = "1".toBigDecimal(),
+            type = OrderType.SELL,
+            execution = OrderExecution.LIMIT
+        )
+        engine.placeOrder(seller2, limitSell)
+
+        val limitBuy2 = Order(
+            id = "O-BUY2",
+            userId = buyer2.id,
+            symbol = "BTC",
+            price = "65000".toBigDecimal(),
+            quantity = "1".toBigDecimal(),
+            type = OrderType.BUY,
+            execution = OrderExecution.LIMIT
+        )
+        engine.placeOrder(buyer2, limitBuy2)
+
+        val limitBuy1 = Order(
+            id = "O-BUY1",
+            userId = buyer1.id,
+            symbol = "BTC",
+            price = "65000".toBigDecimal(),
+            quantity = "1".toBigDecimal(),
+            type = OrderType.BUY,
+            execution = OrderExecution.LIMIT
+        )
+        engine.placeOrder(buyer1, limitBuy1)
+
+        assertTrue(seller.hasEnoughBalance("65000".toBigDecimal(), "USD"))
+
+        assertTrue(buyer2.hasEnoughBalance("1".toBigDecimal(), "BTC"))
+    }
+
+    @Test
+    fun `should trigger take profit and automatically cancel linked stop loss in OCO pair`() {
+        val engine = TradingEngine()
+
+        val seller = UserPortfolio("seller-1")
+        seller.addMoney("1".toBigDecimal(), "BTC")
+
+        val buyer1 = UserPortfolio("buyer-1")
+        buyer1.addMoney("65000".toBigDecimal(), "USD")
+
+        val seller2 = UserPortfolio("seller-2")
+        seller2.addMoney("1".toBigDecimal(), "BTC")
+
+        val buyer2 = UserPortfolio("buyer-2")
+        buyer2.addMoney("65000".toBigDecimal(), "USD")
+
+        val ocoGroupId = "OCO-PAIR-1"
+
+        val stopLossOrder = Order(
+            id = "O-STOP",
+            userId = seller.id,
+            symbol = "BTC",
+            price = null,
+            quantity = "1".toBigDecimal(),
+            type = OrderType.SELL,
+            execution = OrderExecution.STOP_LOSS,
+            stopPrice = "55000".toBigDecimal(),
+            ocoGroupId = ocoGroupId
+        )
+
+        val takeProfitOrder = Order(
+            id = "O-TP",
+            userId = seller.id,
+            symbol = "BTC",
+            price = null,
+            quantity = "1".toBigDecimal(),
+            type = OrderType.SELL,
+            execution = OrderExecution.TAKE_PROFIT,
+            takeProfitPrice = "65000".toBigDecimal(),
+            ocoGroupId = ocoGroupId
+        )
+
+        engine.placeOrder(seller, stopLossOrder)
+        engine.placeOrder(seller, takeProfitOrder)
+
+        val limitSell = Order("O-SELL2", seller2.id, "BTC", "65000".toBigDecimal(), "1".toBigDecimal(), OrderType.SELL)
+        engine.placeOrder(seller2, limitSell)
+
+        val limitBuy2 = Order("O-BUY2", buyer2.id, "BTC", "65000".toBigDecimal(), "1".toBigDecimal(), OrderType.BUY)
+        engine.placeOrder(buyer2, limitBuy2)
+
+        val limitBuy1 = Order("O-BUY1", buyer1.id, "BTC", "65000".toBigDecimal(), "1".toBigDecimal(), OrderType.BUY)
+        engine.placeOrder(buyer1, limitBuy1)
+
+        assertTrue(seller.hasEnoughBalance("65000".toBigDecimal(), "USD"))
+        assertTrue(buyer2.hasEnoughBalance("1".toBigDecimal(), "BTC"))
+    }
+
+    @Test
+    fun `should cancel both orders in OCO pair when one is manually cancelled`() {
+        val engine = TradingEngine()
+        val seller = UserPortfolio("seller-1")
+        seller.addMoney("1".toBigDecimal(), "BTC")
+
+        val ocoGroupId = "OCO-GROUP-1"
+
+        val stopLossOrder = Order(
+            id = "O-STOP-1",
+            userId = seller.id,
+            symbol = "BTC",
+            price = null,
+            quantity = "1".toBigDecimal(),
+            type = OrderType.SELL,
+            execution = OrderExecution.STOP_LOSS,
+            stopPrice = "55000".toBigDecimal(),
+            ocoGroupId = ocoGroupId
+        )
+
+        val takeProfitOrder = Order(
+            id = "O-TP-1",
+            userId = seller.id,
+            symbol = "BTC",
+            price = null,
+            quantity = "1".toBigDecimal(),
+            type = OrderType.SELL,
+            execution = OrderExecution.TAKE_PROFIT,
+            takeProfitPrice = "65000".toBigDecimal(),
+            ocoGroupId = ocoGroupId
+        )
+
+        engine.placeOrder(seller, stopLossOrder)
+        engine.placeOrder(seller, takeProfitOrder)
+
+        val cancelled = engine.cancelOrder("BTC", "O-STOP-1")
+        assertTrue(cancelled)
+
+        val cancelTpAgain = engine.cancelOrder("BTC", "O-TP-1")
+        assertFalse(cancelTpAgain)
+    }
 }

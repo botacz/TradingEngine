@@ -4,7 +4,7 @@ class TradingEngine {
     private val orderBooks = mutableMapOf<String, OrderBook>()
     private val users = mutableMapOf<String, UserPortfolio>()
 
-    private val pendingStopOrders = mutableListOf<Order>()
+    private val pendingTriggerOrders = mutableListOf<Order>()
 
     fun getOrderBook(symbol: String): OrderBook {
         return orderBooks.getOrPut(symbol) { OrderBook(symbol) }
@@ -13,8 +13,8 @@ class TradingEngine {
     fun placeOrder(user: UserPortfolio, order: Order): List<Trade> {
         users[user.id] = user
 
-        if (order.execution == OrderExecution.STOP_LOSS) {
-            pendingStopOrders.add(order)
+        if (order.execution == OrderExecution.STOP_LOSS || order.execution == OrderExecution.TAKE_PROFIT) {
+            pendingTriggerOrders.add(order)
             return emptyList()
         }
 
@@ -43,35 +43,60 @@ class TradingEngine {
             users[trade.buyerId]?.processTrade(trade, OrderType.BUY)
             users[trade.sellerId]?.processTrade(trade, OrderType.SELL)
 
-            checkStopOrders(trade)
+            checkTriggerOrders(trade)
         }
 
         return trades
     }
 
-    private fun checkStopOrders(trade: Trade) {
-        val triggeredOrders = pendingStopOrders.filter { stopOrder ->
-            val stopPrice = stopOrder.stopPrice ?: return@filter false
-            if (stopOrder.symbol != trade.symbol) return@filter false
+    fun cancelOrder(symbol: String, orderId: String): Boolean {
+        val removedFromBook = orderBooks[symbol]?.deleteOrder(orderId) == true
+        if (removedFromBook) return true
 
-            when (stopOrder.type) {
-                OrderType.SELL -> trade.price <= stopPrice
-                OrderType.BUY  -> trade.price >= stopPrice
+        val pendingOrder = pendingTriggerOrders.find { it.id == orderId } ?: return false
+
+        return if (pendingOrder.ocoGroupId != null) {
+            pendingTriggerOrders.removeIf { it.ocoGroupId == pendingOrder.ocoGroupId }
+        } else {
+            pendingTriggerOrders.remove(pendingOrder)
+        }
+    }
+
+    private fun checkTriggerOrders(trade: Trade) {
+        val triggeredOrders = pendingTriggerOrders.filter { order ->
+            if (order.symbol != trade.symbol) return@filter false
+
+            when (order.execution) {
+                OrderExecution.STOP_LOSS -> {
+                    val stopPrice = order.stopPrice ?: return@filter false
+                    when (order.type) {
+                        OrderType.SELL -> trade.price <= stopPrice
+                        OrderType.BUY  -> trade.price >= stopPrice
+                    }
+                }
+                OrderExecution.TAKE_PROFIT -> {
+                    val tpPrice = order.takeProfitPrice ?: return@filter false
+                    when (order.type) {
+                        OrderType.SELL -> trade.price >= tpPrice
+                        OrderType.BUY  -> trade.price <= tpPrice
+                    }
+                }
+                else -> false
             }
         }
 
         for (triggered in triggeredOrders) {
-            pendingStopOrders.remove(triggered)
+            pendingTriggerOrders.remove(triggered)
+
+            if (triggered.ocoGroupId != null) {
+                pendingTriggerOrders.removeIf { pending ->
+                    pending.ocoGroupId == triggered.ocoGroupId && pending.id != triggered.id
+                }
+            }
 
             val marketOrder = triggered.copy(execution = OrderExecution.MARKET)
             val user = users[triggered.userId] ?: continue
             placeOrder(user, marketOrder)
         }
-    }
-
-    fun cancelOrder(symbol: String, orderId: String): Boolean{
-        val orderBook = orderBooks[symbol] ?: return false
-
-        return orderBook.deleteOrder(orderId)
     }
 }
