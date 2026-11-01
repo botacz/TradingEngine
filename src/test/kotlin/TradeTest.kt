@@ -1,4 +1,4 @@
-import java.math.BigDecimal
+import engine.Trade
 import kotlin.test.Test
 import kotlin.test.assertEquals
 

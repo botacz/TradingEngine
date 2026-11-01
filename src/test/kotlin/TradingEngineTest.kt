@@ -1,4 +1,8 @@
-import java.math.BigDecimal
+import engine.Order
+import engine.TradingEngine
+import engine.UserPortfolio
+import engine.OrderType
+import engine.OrderExecution
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -297,13 +301,16 @@ class TradingEngineTest {
         engine.placeOrder(seller, stopLossOrder)
         engine.placeOrder(seller, takeProfitOrder)
 
-        val limitSell = Order("O-SELL2", seller2.id, "BTC", "65000".toBigDecimal(), "1".toBigDecimal(), OrderType.SELL)
+        val limitSell =
+            Order("O-SELL2", seller2.id, "BTC", "65000".toBigDecimal(), "1".toBigDecimal(), OrderType.SELL)
         engine.placeOrder(seller2, limitSell)
 
-        val limitBuy2 = Order("O-BUY2", buyer2.id, "BTC", "65000".toBigDecimal(), "1".toBigDecimal(), OrderType.BUY)
+        val limitBuy2 =
+            Order("O-BUY2", buyer2.id, "BTC", "65000".toBigDecimal(), "1".toBigDecimal(), OrderType.BUY)
         engine.placeOrder(buyer2, limitBuy2)
 
-        val limitBuy1 = Order("O-BUY1", buyer1.id, "BTC", "65000".toBigDecimal(), "1".toBigDecimal(), OrderType.BUY)
+        val limitBuy1 =
+            Order("O-BUY1", buyer1.id, "BTC", "65000".toBigDecimal(), "1".toBigDecimal(), OrderType.BUY)
         engine.placeOrder(buyer1, limitBuy1)
 
         assertTrue(seller.hasEnoughBalance("65000".toBigDecimal(), "USD"))

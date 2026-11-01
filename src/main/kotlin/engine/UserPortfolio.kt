@@ -1,8 +1,10 @@
+package engine
+
 import java.math.BigDecimal
 
 class UserPortfolio(val id: String) {
     private val wallet = mutableMapOf<String, BigDecimal>()
-
+    val tradeHistory = mutableListOf<Trade>()
     fun addMoney(amount: BigDecimal, currency: String) {
         val current = wallet.getOrDefault(currency, BigDecimal.ZERO)
         wallet[currency] = current + amount
@@ -33,5 +35,9 @@ class UserPortfolio(val id: String) {
                 addMoney(totalUsd, "USD")
             }
         }
+        tradeHistory.add(trade)
     }
+
+    fun getBalances(): Map<String, BigDecimal> = wallet.toMap()
+
 }

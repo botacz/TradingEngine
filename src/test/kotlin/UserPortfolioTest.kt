@@ -1,4 +1,4 @@
-import java.math.BigDecimal
+import engine.UserPortfolio
 import kotlin.test.Test
 import kotlin.test.assertTrue
 import kotlin.test.assertFailsWith

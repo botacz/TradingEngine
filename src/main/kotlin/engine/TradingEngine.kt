@@ -1,3 +1,5 @@
+package engine
+
 import java.math.BigDecimal
 
 class TradingEngine {
@@ -26,6 +28,7 @@ class TradingEngine {
                     OrderExecution.LIMIT -> order.price ?: BigDecimal.ZERO
                     OrderExecution.MARKET -> orderBook.getBestAskPrice()
                         ?: throw IllegalArgumentException("Cannot execute market buy: No sell orders available.")
+                    else -> throw IllegalArgumentException("Unsupported order execution type: ${order.execution}")
                 }
                 Pair(priceToUse * order.quantity, "USD")
             }
@@ -98,5 +101,9 @@ class TradingEngine {
             val user = users[triggered.userId] ?: continue
             placeOrder(user, marketOrder)
         }
+    }
+
+    fun getOrCreatePortfolio(userId: String): UserPortfolio {
+        return users.getOrPut(userId) { UserPortfolio(userId) }
     }
 }

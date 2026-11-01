@@ -1,3 +1,5 @@
+package engine
+
 import java.math.BigDecimal
 
 class OrderBook(val symbol: String) {
@@ -71,4 +73,7 @@ class OrderBook(val symbol: String) {
         val removedAsk = asks.removeIf { it.id == id }
         return removedBid || removedAsk
     }
+
+    fun getBids(): List<Order> = bids.toList()
+    fun getAsks(): List<Order> = asks.toList()
 }

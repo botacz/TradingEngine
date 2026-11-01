@@ -1,37 +1,18 @@
-import java.math.BigDecimal
+import engine.*
+import routes.*
+import engine.TradingEngine
+import io.ktor.server.engine.*
+import io.ktor.server.netty.*
+import routes.configureRouting
+import routes.configureSerialization
 
 fun main() {
     val engine = TradingEngine()
-    val user = UserPortfolio("user-main")
 
-    user.addMoney("100000".toBigDecimal(), "USD")
-    user.addMoney("2".toBigDecimal(), "BTC")
+    println("Starting engine.TradingEngine HTTP Server on port 8080...")
 
-    val order1 = Order("TC-1234", user.id, "BTC", "62000".toBigDecimal(), "0.23".toBigDecimal(), OrderType.BUY)
-    val orderSell1 = Order("TX-341", user.id, "BTC", "61000".toBigDecimal(), "0.52".toBigDecimal(), OrderType.SELL)
-
-    val invalidOrder = Order("TC-9999", user.id, "BTC", "500000".toBigDecimal(), "10".toBigDecimal(), OrderType.BUY)
-
-    try {
-        println("Placing invalid order...")
-        engine.placeOrder(user, invalidOrder)
-        println("This line will never be executed if an exception occurs!")
-    } catch (e: IllegalArgumentException) {
-        println("Caught error: ${e.message}")
-    }
-
-    try {
-        engine.placeOrder(user, order1)
-        val trades = engine.placeOrder(user, orderSell1)
-        println("New trades: $trades")
-
-        engine.getOrderBook("BTC").printBook()
-
-        val totalVolume = trades.fold(BigDecimal.ZERO) { acc, trade ->
-            acc + trade.totalValue()
-        }
-        println("Total Volume: $totalVolume USD")
-    } catch (e: IllegalArgumentException) {
-        println("Error: ${e.message}")
-    }
+    embeddedServer(Netty, port = 8081) {
+        configureSerialization()
+        configureRouting(engine)
+    }.start(wait = true)
 }
