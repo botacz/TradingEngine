@@ -23,8 +23,17 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")
 
     implementation("ch.qos.logback:logback-classic:1.4.14")
+    implementation("io.ktor:ktor-server-status-pages:2.3.8")
 
     testImplementation(kotlin("test"))
+
+    val exposedVersion = "0.50.0"
+    implementation("org.jetbrains.exposed:exposed-core:$exposedVersion")
+    implementation("org.jetbrains.exposed:exposed-dao:$exposedVersion")
+    implementation("org.jetbrains.exposed:exposed-jdbc:$exposedVersion")
+
+    implementation("com.zaxxer:HikariCP:5.1.0")
+    implementation("org.postgresql:postgresql:42.7.2")
 }
 
 application {

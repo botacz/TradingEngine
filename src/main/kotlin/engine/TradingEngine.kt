@@ -1,12 +1,24 @@
 package engine
 
 import java.math.BigDecimal
+import repository.*
+import util.toBaseCurrency
 
-class TradingEngine {
+class TradingEngine(
+    private val portfolioRepository: PortfolioRepository,
+    private val tradeRepository: TradeRepository,
+    private val orderRepository: OrderRepository
+) {
     private val orderBooks = mutableMapOf<String, OrderBook>()
     private val users = mutableMapOf<String, UserPortfolio>()
-
     private val pendingTriggerOrders = mutableListOf<Order>()
+
+    init {
+        val activeOrders = orderRepository.getActiveOrders()
+        for (order in activeOrders) {
+            getOrderBook(order.symbol).addOrder(order)
+        }
+    }
 
     fun getOrderBook(symbol: String): OrderBook {
         return orderBooks.getOrPut(symbol) { OrderBook(symbol) }
@@ -32,17 +44,20 @@ class TradingEngine {
                 }
                 Pair(priceToUse * order.quantity, "USD")
             }
-            OrderType.SELL -> Pair(order.quantity, order.symbol)
+            OrderType.SELL -> Pair(order.quantity, order.symbol.toBaseCurrency())
         }
 
         if (!user.hasEnoughBalance(requiredAmount, requiredCurrency)) {
             throw IllegalArgumentException("Insufficient funds. Required: $requiredAmount $requiredCurrency")
         }
 
+        orderRepository.saveOrder(order)
         orderBook.addOrder(order)
         val trades = orderBook.matchOrders()
 
         for (trade in trades) {
+            tradeRepository.saveTrade(trade)
+
             users[trade.buyerId]?.processTrade(trade, OrderType.BUY)
             users[trade.sellerId]?.processTrade(trade, OrderType.SELL)
 
@@ -54,7 +69,10 @@ class TradingEngine {
 
     fun cancelOrder(symbol: String, orderId: String): Boolean {
         val removedFromBook = orderBooks[symbol]?.deleteOrder(orderId) == true
-        if (removedFromBook) return true
+        if (removedFromBook) {
+            orderRepository.deleteOrder(orderId)
+            return true
+        }
 
         val pendingOrder = pendingTriggerOrders.find { it.id == orderId } ?: return false
 
@@ -104,6 +122,6 @@ class TradingEngine {
     }
 
     fun getOrCreatePortfolio(userId: String): UserPortfolio {
-        return users.getOrPut(userId) { UserPortfolio(userId) }
+        return users.getOrPut(userId) { UserPortfolio(userId, portfolioRepository) }
     }
 }

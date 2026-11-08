@@ -9,7 +9,10 @@ import io.ktor.server.plugins.contentnegotiation.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import io.ktor.server.plugins.statuspages.*
+import io.ktor.server.plugins.BadRequestException
 import kotlinx.serialization.json.Json
+import repository.TradeRepository
 
 fun Application.configureSerialization() {
     install(ContentNegotiation) {
@@ -20,7 +23,7 @@ fun Application.configureSerialization() {
     }
 }
 
-fun Application.configureRouting(engine: TradingEngine) {
+fun Application.configureRouting(engine: TradingEngine, tradeRepository: TradeRepository) {
     routing {
         route("/api/v1") {
 
@@ -83,10 +86,34 @@ fun Application.configureRouting(engine: TradingEngine) {
                 val userId = call.parameters["userId"] ?: return@get call.respond(
                     HttpStatusCode.BadRequest, "Missing required parameter 'userId'"
                 )
-                val user = engine.getOrCreatePortfolio(userId)
-                val dtos = user.tradeHistory.map { it.toDto() }
+                val trades = tradeRepository.getTradesForUser(userId)
+                val dtos = trades.map { it.toDto() }
                 call.respond(HttpStatusCode.OK, dtos)
             }
+        }
+    }
+}
+
+fun Application.configureStatusPages() {
+    install(StatusPages) {
+        exception<IllegalArgumentException> { call, cause ->
+            call.respond(
+                HttpStatusCode.BadRequest,
+                mapOf(
+                    "status" to "ERROR",
+                    "message" to (cause.message ?: "Invalid request parameter")
+                )
+            )
+        }
+
+        exception<BadRequestException> { call, cause ->
+            call.respond(
+                HttpStatusCode.BadRequest,
+                mapOf(
+                    "status" to "ERROR",
+                    "message" to "Malformed JSON payload: ${cause.cause?.message ?: cause.message}"
+                )
+            )
         }
     }
 }
