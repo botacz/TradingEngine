@@ -2,18 +2,17 @@
 
 # 🪙 Kotlin Trading Engine
 
-**An in-memory order matching engine and asynchronous REST API built with Kotlin 2.0, Ktor, and Netty.**
+**A persistent order matching engine, real-time WebSocket broadcaster, and secured REST API built with Kotlin 2.0, Ktor, and PostgreSQL.**
 
-A clean, domain-driven exchange core implementing a continuous double-auction order book, Price-Time priority (FIFO), deterministic order execution (Limit, Market, Stop-Loss, Take-Profit, OCO), and atomic balance accounting.
+A clean, domain-driven exchange core implementing a continuous double-auction order book (`TreeMap` + FIFO queues), deterministic order execution (Limit, Market, Stop-Loss, Take-Profit, OCO), atomic balance accounting, JWT authentication, rate limiting, and database crash recovery.
 
-> ⚠️ **Project Status: Active Development / Portfolio Prototype**  
-> This project demonstrates core exchange mechanics, algorithmic order matching, and clean architecture on the JVM. See the [Technical Trade-offs & Planned Evolutions](#-technical-trade-offs--planned-evolutions) section for current design choices and migration paths.
+> 🚀 **Project Status: Functional Backend Prototype**  
+> This project demonstrates core exchange mechanics, algorithmic order matching, real-time streaming, and clean architecture on the JVM. See the [Technical Trade-offs & Planned Evolutions](#-technical-trade-offs--planned-evolutions) section for current design choices and future optimizations.
 
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0.21-7F52FF?style=flat-square&logo=kotlin&logoColor=white)](https://kotlinlang.org/)
 [![JVM](https://img.shields.io/badge/JVM-Java%2021-ED8B00?style=flat-square&logo=openjdk&logoColor=white)](https://adoptium.net/)
 [![Ktor](https://img.shields.io/badge/Ktor-2.3.8-black?style=flat-square&logo=ktor&logoColor=white)](https://ktor.io/)
-[![Gradle](https://img.shields.io/badge/Gradle-8.x-02303A?style=flat-square&logo=gradle&logoColor=white)](https://gradle.org/)
-[![Status](https://img.shields.io/badge/Status-In%20Development-orange?style=flat-square)](#-project-status)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Exposed-336791?style=flat-square&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](#license)
 
 </div>
@@ -29,11 +28,11 @@ A clean, domain-driven exchange core implementing a continuous double-auction or
   - [OCO (One-Cancels-the-Other) Orchestration](#oco-one-cancels-the-other-orchestration)
   - [Pre-Trade Balance Checks & Settlement](#pre-trade-balance-checks--settlement)
 - [Technical Trade-offs & Planned Evolutions](#-technical-trade-offs--planned-evolutions)
-  - [Why `BigDecimal` is used now & What will replace it](#1-why-bigdecimal-is-used-now--what-will-replace-it)
-  - [Why `mutableListOf` is used now & What will replace it](#2-why-mutablelistof-is-used-now--what-will-replace-it)
-  - [Concurrency & Concurrency Model](#3-concurrency--concurrency-model)
+  - [1. Why `BigDecimal` is used now & What will replace it](#1-why-bigdecimal-is-used-now--what-will-replace-it)
+  - [2. Price-Level Bucketing (`TreeMap` + `ArrayDeque`)](#2-price-level-bucketing-treemap--arraydeque)
+  - [3. Concurrency & Concurrency Model](#3-concurrency--concurrency-model)
 - [Project Directory Structure](#-project-directory-structure)
-- [REST API Specification (v1)](#-rest-api-specification-v1)
+- [REST & WebSocket API Specification (v1)](#-rest--websocket-api-specification-v1)
 - [Getting Started & Local Setup](#-getting-started--local-setup)
 - [End-to-End Simulation Walkthrough](#-end-to-end-simulation-walkthrough)
 - [Testing & Verification](#-testing--verification)
@@ -44,50 +43,55 @@ A clean, domain-driven exchange core implementing a continuous double-auction or
 
 ## 📌 Overview
 
-This project is an in-memory **Order Matching & Trading Engine** designed to explore the mechanics behind modern financial exchanges and cryptocurrency spot markets.
+This project is a persistent **Order Matching & Trading Engine** designed to explore the mechanics behind modern financial exchanges and cryptocurrency spot markets.
 
-Rather than relying on third-party trading libraries, the matching logic, order books, and balance ledgers are implemented from scratch in pure Kotlin, exposed via an asynchronous REST API built with Ktor.
+Rather than relying on third-party trading libraries, the matching logic, order books, trigger monitors, and balance ledgers are implemented from scratch in pure Kotlin, backed by PostgreSQL persistence (JetBrains Exposed) and exposed via a JWT-secured REST API and WebSocket feed built with Ktor.
 
 ### Key Goals
-- **Financial Precision:** Absolute protection against floating-point rounding errors.
-- **Fair Execution:** Price-Time Priority (FIFO) matching — best prices match first, timestamp acts as tie-breaker.
-- **Clean Architecture:** Strict boundary separation between external JSON transport DTOs and internal domain entities.
-- **Advanced Order Strategies:** Native handling of Limit, Market, Stop-Loss, Take-Profit, and linked OCO orders.
+- **Financial Precision:** Absolute protection against floating-point rounding errors using `BigDecimal`.
+- **Fair & Fast Execution:** Price-Time Priority (FIFO) matching backed by `TreeMap` price buckets and `ArrayDeque` queues.
+- **Persistence & Recovery:** Automatic state reload of active limit orders, pending triggers, and user wallets on server startup.
+- **Security & Validation:** JWT bearer authentication, IP-based rate limiting, and strict DTO payload validation.
 
 ---
 
 ## 🏗️ How It Works (System Architecture)
 
-The system is split into two primary layers: the **REST Gateway** (network I/O, routing, and serialization) and the **Core Engine** (order matching, trigger monitoring, and balance ledger).
+The system is split into the **Transport & Security Gateway** (Ktor REST, WebSockets, JWT Auth, Rate Limiting, StatusPages), the **Core Engine** (order matching, trigger monitoring, and balance ledger), and the **Persistence Layer** (JetBrains Exposed ORM + PostgreSQL/H2).
 
 ```mermaid
 graph TD
     subgraph Client Layer
         C1[Trading Bot / HTTP Client]
-        C2[Web / Frontend Interface]
+        C2[WebSocket Market Stream Client]
     end
 
-    subgraph Transport Layer [Ktor + Netty]
+    subgraph Transport & Security Layer [Ktor + Netty]
+        SEC["JWT Auth & Rate Limiter"]
         API["REST Endpoints (/api/v1)"]
-        VAL["Validation & Content Negotiation"]
-        MAP["DTO ↔ Domain Mappers"]
+        WS["WebSocket Feed (/ws/trades)"]
+        VAL["DTO Validation & StatusPages"]
     end
 
-    subgraph Core Trading Engine [In-Memory]
+    subgraph Core Trading Engine
         TE["TradingEngine (Coordinator)"]
-        OB["OrderBook (Bids & Asks Queues)"]
+        OB["OrderBook (TreeMap + FIFO Queues)"]
         TRG["Trigger Monitor (Stop-Loss / TP / OCO)"]
         PORT["UserPortfolio (Multi-Currency Balances)"]
     end
 
-    C1 & C2 -->|HTTP JSON| API
-    API --> VAL --> MAP --> TE
-    TE -->|1. Verify Balance| PORT
-    TE -->|2. Insert Order| OB
-    OB -->|3. Match Orders & Emit Trades| TE
-    TE -->|4. Settle Balances| PORT
-    TE -->|5. Evaluate Trigger Prices| TRG
-    TRG -.->|6. Execute Conditional Order| TE
+    subgraph Persistence Layer [JetBrains Exposed]
+        DB[(PostgreSQL / H2 Database)]
+    end
+
+    C1 -->|HTTP JSON + Bearer JWT| SEC --> API --> VAL --> TE
+    TE -->|1. Verify & Settle Balance| PORT
+    TE -->|2. Insert & Match Orders| OB
+    OB -->|3. Emit Executed Trades| TE
+    TE -->|4. Evaluate Trigger Prices| TRG
+    TRG -.->|5. Execute Conditional Order| TE
+    TE -->|6. Persist State| DB
+    TE -->|7. Broadcast Live Trades| WS --> C2
 ```
 
 ### Order Execution Sequence
@@ -96,14 +100,15 @@ graph TD
 sequenceDiagram
     autonumber
     actor Client
-    participant Router as Ktor REST Router
+    participant Router as Ktor Router (JWT)
     participant Engine as TradingEngine
     participant Ledger as UserPortfolio
-    participant Book as OrderBook
-    participant Triggers as TriggerMonitor
+    participant Book as OrderBook (TreeMap)
+    participant DB as PostgreSQL
+    participant WS as WebSocket Broadcaster
 
-    Client->>Router: POST /api/v1/orders
-    Router->>Engine: placeOrder(user, order)
+    Client->>Router: POST /api/v1/orders (Bearer Token)
+    Router->>Engine: placeOrder(authenticatedUser, order)
     
     alt Pre-Trade Balance Verification
         Engine->>Ledger: hasEnoughBalance(requiredAmount, currency)
@@ -115,7 +120,7 @@ sequenceDiagram
     end
 
     alt Conditional Order (STOP_LOSS / TAKE_PROFIT)
-        Engine->>Triggers: Save to Pending Triggers
+        Engine->>DB: Persist Pending Trigger
         Engine-->>Router: Accepted (0 Trades)
         Router-->>Client: 201 Created (Status: ACCEPTED)
     else Immediate / Limit Order
@@ -124,12 +129,9 @@ sequenceDiagram
         Book-->>Engine: List<Trade> (Executed Fills)
         
         loop For each executed trade
-            Engine->>Ledger: Buyer: -USD, +Asset
-            Engine->>Ledger: Seller: -Asset, +USD
-            Engine->>Triggers: checkTriggerOrders(trade)
-            opt Condition Met
-                Triggers->>Engine: Place Synthetic Market Order
-            end
+            Engine->>Ledger: Buyer: -USD, +Asset | Seller: -Asset, +USD
+            Engine->>DB: Save Trade & Update Balances/Orders
+            Engine->>WS: Broadcast Trade JSON
         end
         
         Engine-->>Router: List<Trade>
@@ -143,7 +145,7 @@ sequenceDiagram
 
 ### Supported Order Types
 
-- **`LIMIT`**: A price-capped order. Enters the book and matches against existing opposing orders at the specified limit price or better. Unfilled balance rests in the queue.
+- **`LIMIT`**: A price-capped order. Enters the `TreeMap` book and matches against existing opposing orders at the specified limit price or better. Unfilled balance rests in the FIFO queue.
 - **`MARKET`**: Aggressive liquidity-taking order. Sweeps opposing orders immediately at current market depth. Rejects if opposing liquidity is empty.
 - **`STOP_LOSS`**: Conditional risk mitigation order. Remains off-book until an executed trade crosses the stop price threshold, then fires as a `MARKET` order:
   - *Sell Stop-Loss:* Fires when $\text{Market Price} \le \text{Stop Price}$.
@@ -174,56 +176,52 @@ An OCO group connects two conditional orders (e.g., Take-Profit and Stop-Loss) u
 └──────────────────────────────┘                └──────────────────────────────┘
 ```
 
-When either order triggers or is manually cancelled, the matching engine purges the counterpart order to eliminate double-spend risk.
+When either order triggers or is manually cancelled, the matching engine purges the counterpart order from both memory and the database to eliminate double-spend risk.
 
 ### Pre-Trade Balance Checks & Settlement
 
 Before any order is placed on the order book:
+
 1. **Buy Order:** The engine verifies that user has $\text{Free USD} \ge \text{Price} \times \text{Quantity}$.
 2. **Sell Order:** The engine verifies that user has $\text{Free Base Asset} \ge \text{Quantity}$.
-3. **Settlement:** When trades match, `processTrade()` synchronously shifts balances between buyer and seller wallets.
+3. **Settlement:** When trades match, `processTrade()` synchronously shifts balances between buyer and seller wallets and persists the updated state.
 
 ---
 
 ## ⚖️ Technical Trade-offs & Planned Evolutions
 
-A key part of developing this project is understanding **why certain choices were made for this version** and **how they will be refactored for production-grade speed**.
-
 ### 1. Why `BigDecimal` is used now & What will replace it
 
 - **Current Choice (`java.math.BigDecimal`):**  
-  Standard `Double` or `Float` cannot be used in financial applications due to IEEE 754 representation issues (e.g., `0.1 + 0.2 = 0.30000000000000004`), which lead to penny-rounding discrepancies. `BigDecimal` guarantees exact decimal arithmetic.
+  Standard `Double` or `Float` cannot be used in financial applications due to IEEE 754 representation issues (e.g., `0.1 + 0.2 = 0.30000000000000004`). `BigDecimal` guarantees exact decimal arithmetic across the engine and PostgreSQL numeric columns.
 - **The Drawback:**  
-  `BigDecimal` is an immutable heap object. Every arithmetic operation (`+`, `-`, `*`) creates new heap allocations, leading to Garbage Collector (GC) churn and cache misses under high throughput.
+  `BigDecimal` is an immutable heap object. Every arithmetic operation creates new heap allocations, leading to Garbage Collector (GC) churn under extreme throughput.
 - **Future Replacement:**  
   **Fixed-Point Integer Representation (`Long` / Kotlin `value class`):**  
-  Representing prices and quantities as 64-bit integer units scaled by a fixed multiplier (e.g., $10^8$ for Bitcoin satoshis or $10^4$ for fiat cents/basis points):
-  ```kotlin
-  @JvmInline
-  value class Price(val raw: Long) // Zero heap allocation, register-speed math
-  ```
-  This eliminates 100% of arithmetic heap allocations while preserving exact integer precision.
+  Representing prices and quantities as 64-bit integer units scaled by a fixed multiplier (e.g., $10^8$ for Bitcoin satoshis):
+```kotlin
+@JvmInline
+value class Price(val raw: Long)
+```
 
-### 2. Why `mutableListOf` is used now & What will replace it
+### 2. Price-Level Bucketing (`TreeMap` + `ArrayDeque`)
 
-- **Current Choice (`mutableListOf` + sort):**  
-  Simple and expressive for prototyping order matching logic.
-- **The Drawback:**  
-  Sorting the list on every insertion is $\mathcal{O}(N \log N)$, and deleting an order is a linear scan $\mathcal{O}(N)$.
-- **Future Replacement:**  
-  **Price-Level Bucketing (`TreeMap` + Doubly-Linked Lists):**  
-  - `TreeMap<Long, OrderList>` where orders at the same price are stored in a FIFO queue.
-  - Getting the Best Bid/Ask becomes $\mathcal{O}(1)$.
-  - Inserting at an existing price level becomes $\mathcal{O}(1)$.
-  - Maintaining an `orderId -> OrderNode` hash map makes cancellation $\mathcal{O}(1)$.
+- **Current Implementation:**  
+  Refactored from linear `mutableListOf` sorting to `TreeMap<BigDecimal, ArrayDeque<Order>>` (with `Collections.reverseOrder()` for bids).
+- **Performance Impact:**  
+  - Finding the Best Bid and Best Ask is now $\mathcal{O}(1)$ via `firstEntry()`.
+  - Inserting an order into a price bucket is $\mathcal{O}(\log P)$ (where $P$ is the number of distinct price levels) with $\mathcal{O}(1)$ FIFO queue append.
+  - Calling `.flatten()` converts nested queues into flat order lists for serialization when querying depth.
+- **Future Evolution:**  
+  Adding a secondary `HashMap<OrderId, OrderNode>` index with intrusive doubly-linked lists to achieve $\mathcal{O}(1)$ order cancellation.
 
 ### 3. Concurrency & Concurrency Model
 
 - **Current State:**  
-  In-memory collections within Netty worker threads.
+  Synchronous execution inside Netty worker threads and Exposed database transactions.
 - **Future Evolution:**  
   **Single-Writer Architecture (Disruptor / Actor Pattern):**  
-  Matching engines run fastest when avoiding multi-threaded locks entirely. Incoming requests will be published to a lock-free ring buffer (LMAX Disruptor or Kotlin Coroutine `Channel`), where a single dedicated CPU core processes order book mutations sequentially without lock contention.
+  Publishing incoming commands to a lock-free ring buffer (LMAX Disruptor or Kotlin Coroutine `Channel`), where a single dedicated thread processes order book mutations sequentially without lock contention.
 
 ---
 
@@ -234,22 +232,33 @@ TradingEngine/
 ├── src/
 │   ├── main/
 │   │   └── kotlin/
-│   │       ├── Main.kt                     # Application entry point & Netty server
+│   │       ├── Main.kt                     # Application entry point, DB init & Netty server
+│   │       ├── database/
+│   │       │   ├── DatabaseFactory.kt      # Exposed connection pool & schema setup
+│   │       │   └── Tables.kt               # PostgreSQL/H2 table definitions
 │   │       ├── dto/
-│   │       │   └── OrderDtos.kt            # REST Request/Response models & mappers
+│   │       │   └── OrderDtos.kt            # REST DTOs, input validation & domain mappers
 │   │       ├── engine/
 │   │       │   ├── Order.kt                # Order domain model & enums
-│   │       │   ├── OrderBook.kt            # Order book & matching logic
+│   │       │   ├── OrderBook.kt            # TreeMap + FIFO order book & matching logic
 │   │       │   ├── Trade.kt                # Executed trade transaction record
-│   │       │   ├── TradingEngine.kt        # Multi-symbol router & trigger monitor
+│   │       │   ├── TradingEngine.kt        # Multi-symbol coordinator, triggers & recovery
 │   │       │   └── UserPortfolio.kt        # Wallet balance ledger & settlement
-│   │       └── routes/
-│   │           └── Routing.kt              # Ktor HTTP endpoints & handlers
+│   │       ├── repository/
+│   │       │   ├── OrderRepository.kt      # Active & trigger order persistence
+│   │       │   ├── PortfolioRepository.kt  # User wallet persistence
+│   │       │   └── TradeRepository.kt      # Executed trade history persistence
+│   │       ├── routes/
+│   │       │   ├── Routing.kt              # Ktor HTTP endpoints & StatusPages
+│   │       │   ├── Security.kt             # JWT authentication & IP rate limiting
+│   │       │   └── WebSockets.kt           # Real-time trade stream broadcaster
+│   │       └── util/
+│   │           └── CurrencyUtils.kt        # Symbol & currency parsing helpers
 │   └── test/
 │       └── kotlin/
-│           ├── OrderBookTest.kt            # Matching & FIFO priority unit tests
+│           ├── OrderBookTest.kt            # Matching, FIFO priority & TreeMap unit tests
 │           ├── TradeTest.kt                # Trade value computation tests
-│           ├── TradingEngineTest.kt        # Integration tests (Stop-Loss, TP, OCO)
+│           ├── TradingEngineTest.kt        # Integration tests (Stop-Loss, TP, OCO, DB)
 │           └── UserPortfolioTest.kt        # Balance deposit & invariant tests
 ├── build.gradle.kts                        # Gradle build & dependencies
 ├── settings.gradle.kts                     # Project settings
@@ -258,41 +267,67 @@ TradingEngine/
 
 ---
 
-## 📡 REST API Specification (v1)
+## 📡 REST & WebSocket API Specification (v1)
 
-**Base URL:** `http://localhost:8081/api/v1`
+**Base URL:** `http://localhost:8081/api/v1`  
+**WebSocket Feed:** `ws://localhost:8081/ws/trades`
 
 ### Endpoints
 
-| Method | Endpoint | Description | Status Codes |
-| :---: | :--- | :--- | :---: |
-| `GET` | `/orderbook/{symbol}` | Fetch current depth of bids and asks | `200`, `400` |
-| `POST` | `/orders` | Submit a new order (LIMIT, MARKET, STOP_LOSS, etc.) | `201`, `400` |
-| `DELETE` | `/orders/{symbol}/{id}` | Cancel an active book order or pending trigger | `200`, `404` |
-| `POST` | `/wallet/deposit` | Deposit funds into a user wallet | `200`, `400` |
-| `GET` | `/wallet/{userId}` | Retrieve wallet balances across all currencies | `200`, `400` |
-| `GET` | `/trades/{userId}` | Retrieve filled trade history for a user | `200`, `400` |
+| Method | Endpoint | Auth Required | Description | Status Codes |
+| :---: | :--- | :---: | :--- | :---: |
+| `POST` | `/login` | No | Authenticate user and receive a JWT Bearer token | `200`, `400` |
+| `GET` | `/orderbook/{symbol}` | No | Fetch current depth of bids and asks | `200`, `400` |
+| `POST` | `/orders` | **JWT** | Submit a new order (LIMIT, MARKET, STOP_LOSS, TP, OCO) | `201`, `400`, `401` |
+| `DELETE` | `/orders/{symbol}/{id}` | **JWT** | Cancel an active book order or pending trigger | `200`, `400`, `401`, `404` |
+| `POST` | `/wallet/deposit` | **JWT** | Deposit funds into authenticated user's wallet | `200`, `400`, `401` |
+| `GET` | `/wallet` | **JWT** | Retrieve wallet balances for authenticated user | `200`, `401` |
+| `GET` | `/trades` | **JWT** | Retrieve filled trade history for authenticated user | `200`, `401` |
+| `WS` | `/ws/trades` | No | Real-time JSON stream of executed trades | `101` |
 
 ---
 
 ### Request & Response Examples
 
-#### 1. Deposit Funds
-**`POST /api/v1/wallet/deposit`**
+#### 1. Authenticate & Obtain JWT
+
+`POST /api/v1/login`
+
 ```json
 {
-  "userId": "usr_alice",
+  "userId": "usr_alice"
+}
+```
+
+Response `200 OK`:
+
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+
+#### 2. Deposit Funds
+
+`POST /api/v1/wallet/deposit`  
+Header: `Authorization: Bearer <TOKEN>`
+
+```json
+{
   "amount": "100000.00",
   "currency": "USD"
 }
 ```
-*Response `200 OK`:* `"Deposit successful."`
 
-#### 2. Submit Limit Order
-**`POST /api/v1/orders`**
+Response `200 OK`: `"Deposit successful."`
+
+#### 3. Submit Limit Order
+
+`POST /api/v1/orders`  
+Header: `Authorization: Bearer <TOKEN>`
+
 ```json
 {
-  "userId": "usr_alice",
   "symbol": "BTC",
   "price": "60000.00",
   "quantity": "1.50",
@@ -300,7 +335,9 @@ TradingEngine/
   "execution": "LIMIT"
 }
 ```
-*Response `201 Created`:*
+
+Response `201 Created`:
+
 ```json
 {
   "orderId": "ORD-1729510000000",
@@ -309,9 +346,13 @@ TradingEngine/
 }
 ```
 
-#### 3. View Balances
-**`GET /api/v1/wallet/usr_alice`**
-*Response `200 OK`:*
+#### 4. View Balances
+
+`GET /api/v1/wallet`  
+Header: `Authorization: Bearer <TOKEN>`
+
+Response `200 OK`:
+
 ```json
 {
   "userId": "usr_alice",
@@ -327,20 +368,17 @@ TradingEngine/
 ## 🚀 Getting Started & Local Setup
 
 ### Prerequisites
+
 - **JDK 21** or later
-- **Gradle 8.x** (or the included `./gradlew` wrapper)
+- **PostgreSQL** (running on port `5432` with database `trading_db`, user `postgres`, password `postgrespassword`)
+- **Gradle 8.x+** (or the included `./gradlew` wrapper)
 
 ### Build and Run
 
 ```bash
-# Clone the repository
 git clone https://github.com/botacz/TradingEngine.git
 cd TradingEngine
-
-# Build project
 ./gradlew build
-
-# Run application server
 ./gradlew run
 ```
 
@@ -350,103 +388,66 @@ The server starts on `http://localhost:8081`.
 
 ## 🧪 End-to-End Simulation Walkthrough
 
-Test the complete cycle (deposits, limit buy, limit sell match, and settlement check) using your terminal:
-
 ### PowerShell (Windows)
 
 ```powershell
-# 1. Fund accounts
-curl.exe -X POST http://localhost:8081/api/v1/wallet/deposit `
-  -H "Content-Type: application/json" `
-  -d '{"userId":"usr_alice","amount":"100000.00","currency":"USD"}'
+$ALICE_TOKEN = (curl.exe -s -X POST http://localhost:8081/api/v1/login -H "Content-Type: application/json" -d '{\"userId\":\"usr_alice\"}' | ConvertFrom-Json).token
+$BOB_TOKEN = (curl.exe -s -X POST http://localhost:8081/api/v1/login -H "Content-Type: application/json" -d '{\"userId\":\"usr_bob\"}' | ConvertFrom-Json).token
 
-curl.exe -X POST http://localhost:8081/api/v1/wallet/deposit `
-  -H "Content-Type: application/json" `
-  -d '{"userId":"usr_bob","amount":"2.00","currency":"BTC"}'
+curl.exe -X POST http://localhost:8081/api/v1/wallet/deposit -H "Content-Type: application/json" -H "Authorization: Bearer $ALICE_TOKEN" -d '{\"amount\":\"100000.00\",\"currency\":\"USD\"}'
+curl.exe -X POST http://localhost:8081/api/v1/wallet/deposit -H "Content-Type: application/json" -H "Authorization: Bearer $BOB_TOKEN" -d '{\"amount\":\"2.00\",\"currency\":\"BTC\"}'
 
-# 2. Alice submits Limit Buy (1.5 BTC @ 60,000 USD)
-curl.exe -X POST http://localhost:8081/api/v1/orders `
-  -H "Content-Type: application/json" `
-  -d '{"userId":"usr_alice","symbol":"BTC","price":"60000.00","quantity":"1.50","side":"BUY","execution":"LIMIT"}'
+curl.exe -X POST http://localhost:8081/api/v1/orders -H "Content-Type: application/json" -H "Authorization: Bearer $ALICE_TOKEN" -d '{\"symbol\":\"BTC\",\"price\":\"60000.00\",\"quantity\":\"1.50\",\"side\":\"BUY\",\"execution\":\"LIMIT\"}'
+curl.exe -X POST http://localhost:8081/api/v1/orders -H "Content-Type: application/json" -H "Authorization: Bearer $BOB_TOKEN" -d '{\"symbol\":\"BTC\",\"price\":\"60000.00\",\"quantity\":\"1.50\",\"side\":\"SELL\",\"execution\":\"LIMIT\"}'
 
-# 3. Bob matches with Limit Sell (1.5 BTC @ 60,000 USD)
-curl.exe -X POST http://localhost:8081/api/v1/orders `
-  -H "Content-Type: application/json" `
-  -d '{"userId":"usr_bob","symbol":"BTC","price":"60000.00","quantity":"1.50","side":"SELL","execution":"LIMIT"}'
-
-# 4. Check balances
-curl.exe http://localhost:8081/api/v1/wallet/usr_alice
-curl.exe http://localhost:8081/api/v1/wallet/usr_bob
+curl.exe http://localhost:8081/api/v1/wallet -H "Authorization: Bearer $ALICE_TOKEN"
+curl.exe http://localhost:8081/api/v1/wallet -H "Authorization: Bearer $BOB_TOKEN"
 ```
 
 ### Bash (Linux / macOS)
 
 ```bash
-# 1. Fund accounts
-curl -s -X POST http://localhost:8081/api/v1/wallet/deposit \
-  -H "Content-Type: application/json" \
-  -d '{"userId":"usr_alice","amount":"100000.00","currency":"USD"}'
+ALICE_TOKEN=$(curl -s -X POST http://localhost:8081/api/v1/login -H "Content-Type: application/json" -d '{"userId":"usr_alice"}' | jq -r .token)
+BOB_TOKEN=$(curl -s -X POST http://localhost:8081/api/v1/login -H "Content-Type: application/json" -d '{"userId":"usr_bob"}' | jq -r .token)
 
-curl -s -X POST http://localhost:8081/api/v1/wallet/deposit \
-  -H "Content-Type: application/json" \
-  -d '{"userId":"usr_bob","amount":"2.00","currency":"BTC"}'
+curl -s -X POST http://localhost:8081/api/v1/wallet/deposit -H "Content-Type: application/json" -H "Authorization: Bearer $ALICE_TOKEN" -d '{"amount":"100000.00","currency":"USD"}'
+curl -s -X POST http://localhost:8081/api/v1/wallet/deposit -H "Content-Type: application/json" -H "Authorization: Bearer $BOB_TOKEN" -d '{"amount":"2.00","currency":"BTC"}'
 
-# 2. Place matching orders
-curl -s -X POST http://localhost:8081/api/v1/orders \
-  -H "Content-Type: application/json" \
-  -d '{"userId":"usr_alice","symbol":"BTC","price":"60000.00","quantity":"1.50","side":"BUY","execution":"LIMIT"}'
+curl -s -X POST http://localhost:8081/api/v1/orders -H "Content-Type: application/json" -H "Authorization: Bearer $ALICE_TOKEN" -d '{"symbol":"BTC","price":"60000.00","quantity":"1.50","side":"BUY","execution":"LIMIT"}'
+curl -s -X POST http://localhost:8081/api/v1/orders -H "Content-Type: application/json" -H "Authorization: Bearer $BOB_TOKEN" -d '{"symbol":"BTC","price":"60000.00","quantity":"1.50","side":"SELL","execution":"LIMIT"}'
 
-curl -s -X POST http://localhost:8081/api/v1/orders \
-  -H "Content-Type: application/json" \
-  -d '{"userId":"usr_bob","symbol":"BTC","price":"60000.00","quantity":"1.50","side":"SELL","execution":"LIMIT"}'
-
-# 3. Check settlement
-curl -s http://localhost:8081/api/v1/wallet/usr_alice
-curl -s http://localhost:8081/api/v1/trades/usr_alice
+curl -s http://localhost:8081/api/v1/wallet -H "Authorization: Bearer $ALICE_TOKEN"
+curl -s http://localhost:8081/api/v1/trades -H "Authorization: Bearer $ALICE_TOKEN"
 ```
 
 ---
 
 ## 🔬 Testing & Verification
 
-Run the automated test suite:
+Run the automated test suite (uses isolated in-memory H2 database):
 
 ```bash
 ./gradlew test
 ```
 
-- **`OrderBookTest`**: Validates FIFO priority, partial fills, and cancellation.
-- **`TradingEngineTest`**: Comprehensive tests for Stop-Loss execution, Take-Profit execution, and OCO auto-cancellation logic.
+- **`OrderBookTest`**: Validates `TreeMap` price ordering, FIFO priority, partial fills, and cancellation.
+- **`TradingEngineTest`**: Comprehensive integration tests for Stop-Loss execution, Take-Profit execution, OCO auto-cancellation, and database persistence.
 - **`UserPortfolioTest`**: Tests balance checks, overdraft prevention, and ledger adjustments.
+- **`TradeTest`**: Tests total value computation and calculations across currencies.
 
 ---
 
 ## 🔮 Roadmap & Planned Next Steps
 
-This project is actively being improved. The roadmap outlines upcoming architectural enhancements:
-
-- [ ] **Data Structure Refactoring:**
-  - Replace `mutableListOf` with `TreeMap<Price, OrderQueue>` for $\mathcal{O}(1)$ best bid/ask and $\mathcal{O}(\log P)$ insertion.
-  - Implement an order index map (`Map<OrderId, OrderNode>`) for $\mathcal{O}(1)$ order cancellations.
-- [ ] **Fixed-Point Primitive Accounting:**
-  - Replace heap-allocated `BigDecimal` with 64-bit integer fixed-point types (`Long` with $10^8$ scale) to reduce GC pressure.
-- [ ] **Real-Time Market Data Feeds:**
-  - Add Ktor WebSockets (`/ws/orderbook/{symbol}`) for streaming live Level 2 depth updates and tick-by-tick trades.
-- [ ] **REST API & Validation Enhancements:**
-  - Expose `stopPrice`, `takeProfitPrice`, and `ocoGroupId` in `CreateOrderRequest` DTO.
-  - Add Ktor `StatusPages` plugin for clean HTTP 400 error responses on validation failures.
-- [ ] **Security, Authentication & Rate Limiting:**
-  - **API Rate Limiting:** Implement Token Bucket / Leaky Bucket algorithm per IP / API key to prevent order book spam and DoS attacks.
-  - **Authentication & Authorization:** Secure trading and wallet routes with HMAC SHA-256 API key signatures (Binance/Coinbase style) and JWT bearer tokens.
-  - **Transport Security:** Enforce strict CORS policies and TLS/HTTPS headers.
-  - **Payload Validation & Sanitization:** Strict input bounds checking (maximum precision, tick size enforcement, min/max quantity limits).
-- [ ] **Database & Persistence:**
-  - **Relational Storage:** Integrate PostgreSQL using JetBrains Exposed or Ktorm for persistent user accounts and historical trade logs.
-  - **Schema Migrations:** Automated database versioning via Flyway.
-  - **Event Sourcing / WAL:** Write-Ahead Logging for non-blocking crash recovery and deterministic state replay.
-- [ ] **Benchmarking & Observability:**
-  - Create JMH (Java Microbenchmark Harness) suites to measure matching throughput (orders/sec) and latency distributions.
-  - Export Prometheus metrics via Micrometer (order latency histograms, active book depth).
+- [x] **Data Structure Refactoring:** Replaced `mutableListOf` with `TreeMap<BigDecimal, ArrayDeque<Order>>` for $\mathcal{O}(1)$ best bid/ask and $\mathcal{O}(\log P)$ insertion.
+- [x] **Real-Time Market Data Feeds:** Added Ktor WebSockets (`/ws/trades`) for streaming live tick-by-tick executed trades.
+- [x] **REST API & Validation Enhancements:** Exposed conditional order fields, added strict positive-number validation, and configured Ktor `StatusPages` for clean HTTP 400 error responses.
+- [x] **Security, Authentication & Rate Limiting:** Secured private routes with JWT Bearer tokens (`HMAC256`) and added IP-based Token Bucket rate limiting.
+- [x] **Database & Persistence:** Integrated PostgreSQL/H2 using JetBrains Exposed for persistent portfolios, orders, triggers, and trade history.
+- [ ] **O(1) Order Cancellation Index:** Add a `HashMap<OrderId, OrderNode>` with intrusive doubly-linked lists for constant-time cancellations.
+- [ ] **Fixed-Point Primitive Accounting:** Replace heap-allocated `BigDecimal` with 64-bit integer fixed-point types (`Long` with $10^8$ scale) to reduce GC pressure.
+- [ ] **Single-Writer Concurrency Model:** Introduce an LMAX Disruptor / Coroutine `Channel` loop to eliminate lock contention.
+- [ ] **Benchmarking & Containerization:** Add JMH throughput benchmarks and a `docker-compose.yml` setup for one-command deployment.
 
 ---
 

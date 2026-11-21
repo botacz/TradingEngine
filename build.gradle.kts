@@ -34,6 +34,11 @@ dependencies {
 
     implementation("com.zaxxer:HikariCP:5.1.0")
     implementation("org.postgresql:postgresql:42.7.2")
+    testImplementation("com.h2database:h2:2.2.224")
+    implementation("io.ktor:ktor-server-websockets:2.3.8")
+    implementation("io.ktor:ktor-server-auth:2.3.8")
+    implementation("io.ktor:ktor-server-auth-jwt:2.3.8")
+    implementation("io.ktor:ktor-server-rate-limit:2.3.8")
 }
 
 application {

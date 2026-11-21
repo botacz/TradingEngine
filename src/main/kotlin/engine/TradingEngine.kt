@@ -7,7 +7,8 @@ import util.toBaseCurrency
 class TradingEngine(
     private val portfolioRepository: PortfolioRepository,
     private val tradeRepository: TradeRepository,
-    private val orderRepository: OrderRepository
+    private val orderRepository: OrderRepository,
+    private val onTradeExecuted: (Trade) -> Unit = {}
 ) {
     private val orderBooks = mutableMapOf<String, OrderBook>()
     private val users = mutableMapOf<String, UserPortfolio>()
@@ -16,7 +17,11 @@ class TradingEngine(
     init {
         val activeOrders = orderRepository.getActiveOrders()
         for (order in activeOrders) {
-            getOrderBook(order.symbol).addOrder(order)
+            if (order.execution == OrderExecution.STOP_LOSS || order.execution == OrderExecution.TAKE_PROFIT) {
+                pendingTriggerOrders.add(order)
+            } else {
+                getOrderBook(order.symbol).addOrder(order)
+            }
         }
     }
 
@@ -28,6 +33,7 @@ class TradingEngine(
         users[user.id] = user
 
         if (order.execution == OrderExecution.STOP_LOSS || order.execution == OrderExecution.TAKE_PROFIT) {
+            orderRepository.saveOrder(order)
             pendingTriggerOrders.add(order)
             return emptyList()
         }
@@ -53,13 +59,28 @@ class TradingEngine(
 
         orderRepository.saveOrder(order)
         orderBook.addOrder(order)
+
+        val trackedOrders = (orderBook.getBids() + orderBook.getAsks()).distinct()
+        val initialQuantities = trackedOrders.associate { it.id to it.quantity }
+
         val trades = orderBook.matchOrders()
+
+        for (tracked in trackedOrders) {
+            val initialQty = initialQuantities[tracked.id] ?: tracked.quantity
+            if (tracked.quantity <= BigDecimal.ZERO) {
+                orderRepository.updateOrder(tracked.id, BigDecimal.ZERO, "FILLED")
+            } else if (tracked.quantity < initialQty) {
+                orderRepository.updateOrder(tracked.id, tracked.quantity, "PARTIALLY_FILLED")
+            }
+        }
 
         for (trade in trades) {
             tradeRepository.saveTrade(trade)
 
-            users[trade.buyerId]?.processTrade(trade, OrderType.BUY)
-            users[trade.sellerId]?.processTrade(trade, OrderType.SELL)
+            getOrCreatePortfolio(trade.buyerId).processTrade(trade, OrderType.BUY)
+            getOrCreatePortfolio(trade.sellerId).processTrade(trade, OrderType.SELL)
+
+            onTradeExecuted(trade)
 
             checkTriggerOrders(trade)
         }
@@ -77,8 +98,11 @@ class TradingEngine(
         val pendingOrder = pendingTriggerOrders.find { it.id == orderId } ?: return false
 
         return if (pendingOrder.ocoGroupId != null) {
-            pendingTriggerOrders.removeIf { it.ocoGroupId == pendingOrder.ocoGroupId }
+            val groupOrders = pendingTriggerOrders.filter { it.ocoGroupId == pendingOrder.ocoGroupId }
+            groupOrders.forEach { orderRepository.deleteOrder(it.id) }
+            pendingTriggerOrders.removeAll(groupOrders)
         } else {
+            orderRepository.deleteOrder(pendingOrder.id)
             pendingTriggerOrders.remove(pendingOrder)
         }
     }
@@ -108,15 +132,18 @@ class TradingEngine(
 
         for (triggered in triggeredOrders) {
             pendingTriggerOrders.remove(triggered)
+            orderRepository.deleteOrder(triggered.id)
 
             if (triggered.ocoGroupId != null) {
-                pendingTriggerOrders.removeIf { pending ->
-                    pending.ocoGroupId == triggered.ocoGroupId && pending.id != triggered.id
+                val linkedOrders = pendingTriggerOrders.filter {
+                    it.ocoGroupId == triggered.ocoGroupId && it.id != triggered.id
                 }
+                linkedOrders.forEach { orderRepository.deleteOrder(it.id) }
+                pendingTriggerOrders.removeAll(linkedOrders)
             }
 
             val marketOrder = triggered.copy(execution = OrderExecution.MARKET)
-            val user = users[triggered.userId] ?: continue
+            val user = getOrCreatePortfolio(triggered.userId)
             placeOrder(user, marketOrder)
         }
     }

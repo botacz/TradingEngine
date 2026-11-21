@@ -31,7 +31,9 @@ object OrdersTable : Table("orders") {
     val side = varchar("side", 10)
     val execution = varchar("execution", 20)
     val status = varchar("status", 20)
+    val stopPrice = decimal("stop_price", 30, 8).nullable()
+    val takeProfitPrice = decimal("take_profit_price", 30, 8).nullable()
+    val ocoGroupId = varchar("oco_group_id", 64).nullable()
     val timestamp = long("timestamp")
-
     override val primaryKey = PrimaryKey(id)
 }

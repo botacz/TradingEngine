@@ -1,20 +1,50 @@
+import database.OrdersTable
+import database.PortfoliosTable
+import database.TradesTable
 import engine.Order
+import engine.OrderExecution
+import engine.OrderType
 import engine.TradingEngine
 import engine.UserPortfolio
-import engine.OrderType
-import engine.OrderExecution
+import org.jetbrains.exposed.sql.Database
+import org.jetbrains.exposed.sql.SchemaUtils
+import org.jetbrains.exposed.sql.transactions.transaction
+import repository.OrderRepository
+import repository.PortfolioRepository
+import repository.TradeRepository
+import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
-import kotlin.test.assertTrue
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class TradingEngineTest {
 
+    private lateinit var portfolioRepository: PortfolioRepository
+    private lateinit var tradeRepository: TradeRepository
+    private lateinit var orderRepository: OrderRepository
+    private lateinit var engine: TradingEngine
+
+    @BeforeTest
+    fun setup() {
+        Database.connect(
+            url = "jdbc:h2:mem:test_engine;DB_CLOSE_DELAY=-1;",
+            driver = "org.h2.Driver"
+        )
+        transaction {
+            SchemaUtils.drop(PortfoliosTable, TradesTable, OrdersTable)
+            SchemaUtils.create(PortfoliosTable, TradesTable, OrdersTable)
+        }
+        portfolioRepository = PortfolioRepository()
+        tradeRepository = TradeRepository()
+        orderRepository = OrderRepository()
+        engine = TradingEngine(portfolioRepository, tradeRepository, orderRepository)
+    }
+
     @Test
     fun `should throw exception when user has insufficient funds`() {
-        val engine = TradingEngine()
-        val user = UserPortfolio("user-1")
+        val user = UserPortfolio("user-1", portfolioRepository)
         val order = Order(
             id = "O-1",
             userId = user.id,
@@ -31,12 +61,10 @@ class TradingEngineTest {
 
     @Test
     fun `should process trade and update wallet balances`() {
-        val engine = TradingEngine()
-
-        val buyer = UserPortfolio("buyer-1")
+        val buyer = UserPortfolio("buyer-1", portfolioRepository)
         buyer.addMoney("60000".toBigDecimal(), "USD")
 
-        val seller = UserPortfolio("seller-1")
+        val seller = UserPortfolio("seller-1", portfolioRepository)
         seller.addMoney("1".toBigDecimal(), "BTC")
 
         val buyOrder = Order(
@@ -66,12 +94,10 @@ class TradingEngineTest {
 
     @Test
     fun `should execute market buy order at best ask price`() {
-        val engine = TradingEngine()
-
-        val seller = UserPortfolio("seller-1")
+        val seller = UserPortfolio("seller-1", portfolioRepository)
         seller.addMoney("1".toBigDecimal(), "BTC")
 
-        val buyer = UserPortfolio("buyer-1")
+        val buyer = UserPortfolio("buyer-1", portfolioRepository)
         buyer.addMoney("70000".toBigDecimal(), "USD")
 
         val limitSell = Order(
@@ -103,8 +129,7 @@ class TradingEngineTest {
 
     @Test
     fun `should successfully cancel active order`() {
-        val engine = TradingEngine()
-        val user = UserPortfolio("user-1")
+        val user = UserPortfolio("user-1", portfolioRepository)
         user.addMoney("100000".toBigDecimal(), "USD")
 
         val order = Order(
@@ -126,18 +151,16 @@ class TradingEngineTest {
 
     @Test
     fun `should trigger stop loss order when market price drops`() {
-        val engine = TradingEngine()
-
-        val seller = UserPortfolio("seller-1")
+        val seller = UserPortfolio("seller-1", portfolioRepository)
         seller.addMoney("1".toBigDecimal(), "BTC")
 
-        val seller2 = UserPortfolio("seller-2")
+        val seller2 = UserPortfolio("seller-2", portfolioRepository)
         seller2.addMoney("1".toBigDecimal(), "BTC")
 
-        val buyer1 = UserPortfolio("buyer-1")
+        val buyer1 = UserPortfolio("buyer-1", portfolioRepository)
         buyer1.addMoney("60000".toBigDecimal(), "USD")
 
-        val buyer2 = UserPortfolio("buyer-2")
+        val buyer2 = UserPortfolio("buyer-2", portfolioRepository)
         buyer2.addMoney("60000".toBigDecimal(), "USD")
 
         val stopLossOrder = Order(
@@ -186,24 +209,21 @@ class TradingEngineTest {
         engine.placeOrder(buyer1, limitBuy1)
 
         assertTrue(seller.hasEnoughBalance("54000".toBigDecimal(), "USD"))
-
         assertTrue(buyer2.hasEnoughBalance("1".toBigDecimal(), "BTC"))
     }
 
     @Test
     fun `should trigger take profit order when market price rises`() {
-        val engine = TradingEngine()
-
-        val seller = UserPortfolio("seller-1")
+        val seller = UserPortfolio("seller-1", portfolioRepository)
         seller.addMoney("1".toBigDecimal(), "BTC")
 
-        val seller2 = UserPortfolio("seller-2")
+        val seller2 = UserPortfolio("seller-2", portfolioRepository)
         seller2.addMoney("1".toBigDecimal(), "BTC")
 
-        val buyer1 = UserPortfolio("buyer-1")
+        val buyer1 = UserPortfolio("buyer-1", portfolioRepository)
         buyer1.addMoney("65000".toBigDecimal(), "USD")
 
-        val buyer2 = UserPortfolio("buyer-2")
+        val buyer2 = UserPortfolio("buyer-2", portfolioRepository)
         buyer2.addMoney("65000".toBigDecimal(), "USD")
 
         val takeProfitOrder = Order(
@@ -252,24 +272,21 @@ class TradingEngineTest {
         engine.placeOrder(buyer1, limitBuy1)
 
         assertTrue(seller.hasEnoughBalance("65000".toBigDecimal(), "USD"))
-
         assertTrue(buyer2.hasEnoughBalance("1".toBigDecimal(), "BTC"))
     }
 
     @Test
     fun `should trigger take profit and automatically cancel linked stop loss in OCO pair`() {
-        val engine = TradingEngine()
-
-        val seller = UserPortfolio("seller-1")
+        val seller = UserPortfolio("seller-1", portfolioRepository)
         seller.addMoney("1".toBigDecimal(), "BTC")
 
-        val buyer1 = UserPortfolio("buyer-1")
+        val buyer1 = UserPortfolio("buyer-1", portfolioRepository)
         buyer1.addMoney("65000".toBigDecimal(), "USD")
 
-        val seller2 = UserPortfolio("seller-2")
+        val seller2 = UserPortfolio("seller-2", portfolioRepository)
         seller2.addMoney("1".toBigDecimal(), "BTC")
 
-        val buyer2 = UserPortfolio("buyer-2")
+        val buyer2 = UserPortfolio("buyer-2", portfolioRepository)
         buyer2.addMoney("65000".toBigDecimal(), "USD")
 
         val ocoGroupId = "OCO-PAIR-1"
@@ -319,8 +336,7 @@ class TradingEngineTest {
 
     @Test
     fun `should cancel both orders in OCO pair when one is manually cancelled`() {
-        val engine = TradingEngine()
-        val seller = UserPortfolio("seller-1")
+        val seller = UserPortfolio("seller-1", portfolioRepository)
         seller.addMoney("1".toBigDecimal(), "BTC")
 
         val ocoGroupId = "OCO-GROUP-1"
@@ -357,5 +373,74 @@ class TradingEngineTest {
 
         val cancelTpAgain = engine.cancelOrder("BTC", "O-TP-1")
         assertFalse(cancelTpAgain)
+    }
+
+    @Test
+    fun `should persist partially filled order quantity in database`() {
+        val buyer = UserPortfolio("buyer-1", portfolioRepository)
+        buyer.addMoney("120000".toBigDecimal(), "USD")
+
+        val seller = UserPortfolio("seller-1", portfolioRepository)
+        seller.addMoney("1".toBigDecimal(), "BTC")
+
+        val buyOrder = Order("O-BUY-PARTIAL", buyer.id, "BTC", "60000".toBigDecimal(), "2".toBigDecimal(), OrderType.BUY)
+        val sellOrder = Order("O-SELL-PARTIAL", seller.id, "BTC", "60000".toBigDecimal(), "1".toBigDecimal(), OrderType.SELL)
+
+        engine.placeOrder(buyer, buyOrder)
+        engine.placeOrder(seller, sellOrder)
+
+        val activeOrders = orderRepository.getActiveOrders()
+        assertEquals(1, activeOrders.size)
+        assertEquals("O-BUY-PARTIAL", activeOrders.first().id)
+        assertEquals(0, "1".toBigDecimal().compareTo(activeOrders.first().quantity))
+    }
+
+    @Test
+    fun `should reload pending stop loss order after engine restart`() {
+        val seller = UserPortfolio("seller-1", portfolioRepository)
+        seller.addMoney("1".toBigDecimal(), "BTC")
+
+        val stopLoss = Order(
+            id = "O-STOP-PERSIST",
+            userId = seller.id,
+            symbol = "BTC",
+            price = null,
+            quantity = "1".toBigDecimal(),
+            type = OrderType.SELL,
+            execution = OrderExecution.STOP_LOSS,
+            stopPrice = "55000".toBigDecimal()
+        )
+        engine.placeOrder(seller, stopLoss)
+
+        val restartedEngine = TradingEngine(portfolioRepository, tradeRepository, orderRepository)
+        val cancelled = restartedEngine.cancelOrder("BTC", "O-STOP-PERSIST")
+        assertTrue(cancelled)
+    }
+
+    @Test
+    fun `should notify listener via callback when trade is executed`() {
+        val notifiedTrades = mutableListOf<engine.Trade>()
+        val wsEngine = TradingEngine(
+            portfolioRepository = portfolioRepository,
+            tradeRepository = tradeRepository,
+            orderRepository = orderRepository,
+            onTradeExecuted = { trade -> notifiedTrades.add(trade) }
+        )
+
+        val buyer = UserPortfolio("buyer-ws", portfolioRepository)
+        buyer.addMoney("60000".toBigDecimal(), "USD")
+
+        val seller = UserPortfolio("seller-ws", portfolioRepository)
+        seller.addMoney("1".toBigDecimal(), "BTC")
+
+        val buyOrder = Order("O-WS-1", buyer.id, "BTC", "60000".toBigDecimal(), "1".toBigDecimal(), OrderType.BUY)
+        val sellOrder = Order("O-WS-2", seller.id, "BTC", "60000".toBigDecimal(), "1".toBigDecimal(), OrderType.SELL)
+
+        wsEngine.placeOrder(buyer, buyOrder)
+        wsEngine.placeOrder(seller, sellOrder)
+
+        assertEquals(1, notifiedTrades.size)
+        assertEquals("BTC", notifiedTrades.first().symbol)
+        assertEquals("60000".toBigDecimal(), notifiedTrades.first().price)
     }
 }
